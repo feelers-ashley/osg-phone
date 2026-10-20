@@ -1,92 +1,511 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en-GB">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#14130f">
-<title>One Small Gesture · phone</title>
-<style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #14130f; color: #f4f2ed;
-    font-family: "Instrument Sans", Aptos, system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
-  #pad { position: fixed; inset: 0; touch-action: none; }
-  #top { position: fixed; left: 0; right: 0; top: 0; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 0; pointer-events: none; }
-  #title { font-size: 22px; font-weight: 700; margin: 0; }
-  #prompt { font-size: 16px; opacity: .75; margin: 4px 0 0; }
-  #status { position: fixed; left: 20px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); font: 12px ui-monospace, Menlo, monospace; opacity: .6; pointer-events: none; }
-  #dot { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); right: 20px; width: 14px; height: 14px; border-radius: 50%; background: #666; }
-</style>
-</head>
-<body>
-<canvas id="pad"></canvas>
-<div id="top"><p id="title">One Small Gesture</p><p id="prompt">Connecting…</p></div>
-<div id="status">connecting</div><div id="dot"></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#14130f" />
+    <title>One Small Gesture · phone</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #14130f;
+        color: #f4f2ed;
+        font-family: "Instrument Sans", Aptos, system-ui, sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #pad {
+        position: fixed;
+        inset: 0;
+        touch-action: none;
+      }
+      #top {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 0;
+        padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 0;
+        pointer-events: none;
+      }
+      #title {
+        font-size: 22px;
+        font-weight: 700;
+        margin: 0;
+      }
+      #prompt {
+        font-size: 16px;
+        opacity: 0.75;
+        margin: 4px 0 0;
+      }
+      #status {
+        position: fixed;
+        left: 20px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        font: 12px ui-monospace, Menlo, monospace;
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      #dot {
+        position: fixed;
+        bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+        right: 20px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="pad"></canvas>
+    <div id="top">
+      <p id="title">One Small Gesture</p>
+      <p id="prompt">Connecting…</p>
+    </div>
+    <div id="status">connecting</div>
+    <div id="dot"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script>
-/* The phone side of One Small Gesture. It sends every touch to the laptop
-   whose id is in the address (?to=osg-…). Host this page once; students never edit it. */
-const params = new URLSearchParams(location.search);
-const TO = params.get('to');
-const $ = (id) => document.getElementById(id);
-const pad = $('pad'), g = pad.getContext('2d');
-let hue = 0, conn = null, peer = null, ripples = [];
+    <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-database-compat.js"></script>
+    <script>
+      /* TUTOR: paste the same Firebase config you put in the template's room.js. */
+      const FIREBASE_CONFIG = {
+        apiKey: "AIzaSyA2WWfOjkzHoDPO2A5T5Y7CE1pHhimRYaM",
+        authDomain: "signalroom-c4c48.firebaseapp.com",
+        databaseURL:
+          "https://signalroom-c4c48-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "signalroom-c4c48",
+        appId: "1:934108614640:web:6fb057d17794c733c35735",
+      };
+    </script>
+    <script>
+      /*
+  net.js — a tiny shared-state layer for classroom sketches.
 
-function size() { const d = devicePixelRatio || 1; pad.width = innerWidth * d; pad.height = innerHeight * d; g.setTransform(d, 0, 0, d, 0, 0); }
-addEventListener('resize', size); size();
+  Uses Firebase Realtime Database when config.js has a real config.
+  Falls back to LOCAL MODE (browser tabs on one computer, via BroadcastChannel)
+  when the config is still a placeholder, or when the address ends in ?local.
 
-function setStatus(text, ok) { $('status').textContent = text; $('dot').style.background = ok ? `hsl(${hue} 80% 60%)` : '#666'; }
+  You do not need to edit this file.
 
-function peerOptions() {
-  const h = params.get('peerhost');
-  if (!h) return {};
-  const [host, port] = h.split(':');
-  return { host, port: +(port || 443), path: '/', secure: !port || port === '443' };
-}
+  Net.start(firebaseConfig, roomName)   connect; returns 'firebase' or 'local'
+  Net.id                                this device's random id
+  Net.set(path, value)                  write a value
+  Net.update(path, object)              merge some fields into a value
+  Net.push(path, value)                 add a new child with a time-ordered key
+  Net.remove(path)                      delete a value
+  Net.here(path, value)                 write a value that disappears when this device leaves
+  Net.onValue(path, fn(value))          run fn now and whenever the value changes
+  Net.onNew(path, fn(value, key))       run fn for each child pushed after now
+  Net.onRecent(path, n, fn(value, key, isNew))  the last n children, then each new one
+  Net.onStatus(fn(connected, mode))     connection changes
+  Net.now()                             time in ms, shared across devices (roughly)
+*/
+      (function () {
+        const Net = {};
+        const split = (p) =>
+          String(p || "")
+            .split("/")
+            .filter(Boolean);
+        const join = (...parts) =>
+          parts.map(String).join("/").split("/").filter(Boolean).join("/");
 
-function connect() {
-  if (!TO) { $('prompt').textContent = 'Scan the QR code on the laptop screen to join.'; setStatus('no laptop in the address', false); return; }
-  if (!peer || peer.destroyed) {
-    peer = new Peer(undefined, peerOptions());
-    peer.on('open', open);
-    peer.on('error', (e) => { setStatus('trying again (' + e.type + ')', false); if (e.type !== 'peer-unavailable') { peer.destroy(); } setTimeout(connect, 2000); });
-    peer.on('disconnected', () => peer.reconnect());
-  } else open();
-}
+        function makeId() {
+          let id = null;
+          try {
+            id = sessionStorage.getItem("net-id");
+          } catch (e) {}
+          if (!id) {
+            id = Math.random().toString(36).slice(2, 8);
+            try {
+              sessionStorage.setItem("net-id", id);
+            } catch (e) {}
+          }
+          return id;
+        }
+        Net.id = makeId();
 
-function open() {
-  setStatus('connecting to the laptop…', false);
-  conn = peer.connect(TO);
-  conn.on('open', () => setStatus('connected', true));
-  conn.on('data', (d) => {
-    if (d && d.t === 'hello') {
-      hue = d.hue; document.body.style.background = d.bg; document.body.style.color = d.ink;
-      $('title').textContent = d.title; $('prompt').textContent = d.prompt; setStatus('connected', true);
-    }
-  });
-  conn.on('close', () => { setStatus('the laptop went away · retrying', false); setTimeout(connect, 2000); });
-}
-connect();
+        let impl = null;
+        let statusFns = [];
+        let status = { connected: false, mode: "none" };
+        function setStatus(connected, mode) {
+          status = { connected, mode };
+          statusFns.forEach((fn) => fn(connected, mode));
+        }
+        Net.onStatus = (fn) => {
+          statusFns.push(fn);
+          fn(status.connected, status.mode);
+        };
 
-/* ---- touches → laptop ---- */
-let lastMove = 0;
-function send(t, e) {
-  const x = +(e.clientX / innerWidth).toFixed(4), y = +(e.clientY / innerHeight).toFixed(4);
-  if (t === 'm') { const now = performance.now(); if (now - lastMove < 33) return; lastMove = now; }
-  if (t === 'd') ripples.push({ x: e.clientX, y: e.clientY, born: performance.now() });
-  if (conn && conn.open) conn.send({ t, x, y, f: e.pointerId === undefined ? '' : String(e.isPrimary ? '' : e.pointerId) });
-}
-pad.addEventListener('pointerdown', (e) => { pad.setPointerCapture(e.pointerId); send('d', e); });
-pad.addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') send('m', e); });
-pad.addEventListener('pointerup', (e) => send('u', e));
-pad.addEventListener('pointercancel', (e) => send('u', e));
+        function isPlaceholder(cfg) {
+          return (
+            !cfg ||
+            !cfg.apiKey ||
+            /PASTE|YOUR/i.test(cfg.apiKey) ||
+            !cfg.databaseURL ||
+            /PASTE|YOUR/i.test(cfg.databaseURL)
+          );
+        }
 
-/* a small local ring so a touch feels answered */
-(function loop(now) {
-  g.clearRect(0, 0, innerWidth, innerHeight);
-  ripples = ripples.filter((r) => now - r.born < 700);
-  ripples.forEach((r) => { const a = (now - r.born) / 700; g.strokeStyle = `hsla(${hue},80%,65%,${1 - a})`; g.lineWidth = 2; g.beginPath(); g.arc(r.x, r.y, 10 + a * 60, 0, 7); g.stroke(); });
-  requestAnimationFrame(loop);
-})(0);
-</script>
-</body>
+        Net.start = function (firebaseConfig, roomName) {
+          const room = String(roomName || "room").replace(/[.#$\[\]]/g, "-");
+          const forceLocal = /[?&]local\b/.test(location.search);
+          if (
+            !forceLocal &&
+            !isPlaceholder(firebaseConfig) &&
+            window.firebase
+          ) {
+            impl = firebaseImpl(firebaseConfig, room);
+            Net.mode = "firebase";
+          } else {
+            impl = localImpl(room);
+            Net.mode = "local";
+            console.log(
+              "%cnet.js: LOCAL MODE — only tabs in this browser can see each other. Paste your Firebase config into config.js to go across devices.",
+              "color:#b45309"
+            );
+          }
+          Net.room = room;
+          return Net.mode;
+        };
+
+        [
+          "set",
+          "update",
+          "push",
+          "remove",
+          "here",
+          "onValue",
+          "onNew",
+          "onRecent",
+          "now",
+        ].forEach((name) => {
+          Net[name] = function (...args) {
+            if (!impl)
+              throw new Error(
+                "net.js: call Net.start(...) before Net." + name + "()"
+              );
+            return impl[name](...args);
+          };
+        });
+
+        /* ---------------- Firebase Realtime Database ---------------- */
+        function firebaseImpl(cfg, room) {
+          const app = firebase.apps.length
+            ? firebase.app()
+            : firebase.initializeApp(cfg);
+          const db = app.database();
+          const ref = (p) => db.ref(join("rooms", room, p));
+          let offset = 0;
+          db.ref(".info/serverTimeOffset").on("value", (s) => {
+            offset = s.val() || 0;
+          });
+          const heres = [];
+          db.ref(".info/connected").on("value", (s) => {
+            const ok = s.val() === true;
+            if (ok)
+              heres.forEach((h) => {
+                h.ref.onDisconnect().remove();
+                h.ref.set(h.value);
+              });
+            setStatus(ok, "firebase");
+          });
+          return {
+            set: (p, v) => ref(p).set(v),
+            update: (p, v) => ref(p).update(v),
+            push: (p, v) => ref(p).push(v),
+            remove: (p) => ref(p).remove(),
+            here(p, v) {
+              const r = ref(p);
+              let h = heres.find((x) => x.path === p);
+              if (!h) {
+                h = { path: p, ref: r, value: v };
+                heres.push(h);
+                r.onDisconnect().remove();
+              }
+              h.value = v;
+              return r.set(v);
+            },
+            onValue: (p, fn) => ref(p).on("value", (s) => fn(s.val())),
+            onNew(p, fn) {
+              const start = ref(p).push().key; // a key for "now" — never written
+              ref(p)
+                .orderByKey()
+                .startAt(start)
+                .on("child_added", (s) => fn(s.val(), s.key));
+            },
+            onRecent(p, n, fn) {
+              const start = ref(p).push().key;
+              ref(p)
+                .limitToLast(n)
+                .on("child_added", (s) => fn(s.val(), s.key, s.key > start));
+            },
+            now: () => Date.now() + offset,
+          };
+        }
+
+        /* ---------------- Local mode: tabs in one browser ---------------- */
+        function localImpl(room) {
+          const ch = new BroadcastChannel("net-local-" + room);
+          let tree = {};
+          const valueFns = []; // {path, fn}
+          const childFns = []; // {path, fn}
+          const recentFns = []; // {path, n, fn} — replayed when another tab sends its history
+          const mine = new Set(); // paths written with here()
+          let synced = false;
+          const merge = (a, b) => {
+            if (!a || typeof a !== "object" || !b || typeof b !== "object")
+              return b === undefined ? a : b;
+            const o = Object.assign({}, a);
+            Object.keys(b).forEach((k) => {
+              o[k] = merge(a[k], b[k]);
+            });
+            return o;
+          };
+
+          const get = (p) =>
+            split(p).reduce(
+              (o, k) => (o && typeof o === "object" ? o[k] : undefined),
+              tree
+            );
+          function put(p, v) {
+            const keys = split(p);
+            if (!keys.length) {
+              tree = v == null ? {} : v;
+              return;
+            }
+            let o = tree;
+            keys.slice(0, -1).forEach((k) => {
+              if (!o[k] || typeof o[k] !== "object") o[k] = {};
+              o = o[k];
+            });
+            const last = keys[keys.length - 1];
+            if (v == null) delete o[last];
+            else o[last] = JSON.parse(JSON.stringify(v));
+          }
+          const clone = (v) =>
+            v === undefined ? null : JSON.parse(JSON.stringify(v));
+          function notify(changed, pushedKey) {
+            valueFns.forEach((l) => {
+              const a = l.path,
+                b = changed;
+              if (
+                a === b ||
+                a.startsWith(b + "/") ||
+                b.startsWith(a + "/") ||
+                a === "" ||
+                b === ""
+              )
+                l.fn(clone(get(a)));
+            });
+            if (pushedKey) {
+              const parent = split(changed).slice(0, -1).join("/");
+              childFns.forEach((l) => {
+                if (l.path === parent) l.fn(clone(get(changed)), pushedKey);
+              });
+            }
+          }
+          function apply(msg) {
+            if (msg.op === "set") put(msg.path, msg.value);
+            if (msg.op === "update")
+              Object.entries(msg.value || {}).forEach(([k, v]) =>
+                put(join(msg.path, k), v)
+              );
+            if (msg.op === "remove") put(msg.path, null);
+            notify(
+              msg.path,
+              msg.op === "push"
+                ? (put(msg.path, msg.value), split(msg.path).pop())
+                : null
+            );
+          }
+          function send(msg) {
+            apply(msg);
+            ch.postMessage(msg);
+          }
+          ch.onmessage = (e) => {
+            const m = e.data;
+            if (m.op === "hello") {
+              ch.postMessage({ op: "snapshot", tree });
+              mine.forEach((p) =>
+                ch.postMessage({ op: "set", path: p, value: get(p) })
+              );
+              return;
+            }
+            if (m.op === "snapshot") {
+              if (!synced && m.tree && Object.keys(m.tree).length) {
+                synced = true;
+                tree = merge(m.tree, tree);
+                notify("");
+                recentFns.forEach((l) => {
+                  const kids = get(l.path) || {};
+                  Object.keys(kids)
+                    .sort()
+                    .slice(-l.n)
+                    .forEach((k) => l.fn(clone(kids[k]), k, false));
+                });
+              }
+              return;
+            }
+            apply(m);
+          };
+          window.addEventListener("pagehide", () =>
+            mine.forEach((p) => ch.postMessage({ op: "remove", path: p }))
+          );
+          ch.postMessage({ op: "hello" });
+          setTimeout(() => setStatus(true, "local"), 0);
+          let n = 0;
+          const key = () =>
+            Date.now().toString(36).padStart(9, "0") +
+            (n++).toString(36).padStart(3, "0") +
+            Math.random().toString(36).slice(2, 5);
+
+          return {
+            set: (p, v) => send({ op: "set", path: p, value: v }),
+            update: (p, v) => send({ op: "update", path: p, value: v }),
+            push: (p, v) =>
+              send({ op: "push", path: join(p, key()), value: v }),
+            remove: (p) => send({ op: "remove", path: p }),
+            here: (p, v) => {
+              mine.add(p);
+              send({ op: "set", path: p, value: v });
+            },
+            onValue: (p, fn) => {
+              valueFns.push({ path: split(p).join("/"), fn });
+              fn(clone(get(p)));
+            },
+            onNew: (p, fn) => childFns.push({ path: split(p).join("/"), fn }),
+            onRecent(p, n, fn) {
+              const kids = get(p) || {};
+              Object.keys(kids)
+                .sort()
+                .slice(-n)
+                .forEach((k) => fn(clone(kids[k]), k, false));
+              recentFns.push({ path: split(p).join("/"), n, fn });
+              childFns.push({
+                path: split(p).join("/"),
+                fn: (v, k) => fn(v, k, true),
+              });
+            },
+            now: () => Date.now(),
+          };
+        }
+
+        window.Net = Net;
+      })();
+    </script>
+    <script>
+      /* The phone side of One Small Gesture. Touches are relayed through the database
+   to the laptop whose id is in the address (?to=…). Students never edit this page. */
+      const TO = new URLSearchParams(location.search).get("to");
+      const $ = (id) => document.getElementById(id);
+      const pad = $("pad"),
+        g = pad.getContext("2d");
+      let ripples = [],
+        live = false,
+        online = false;
+
+      function hueOf(id) {
+        let h = 0;
+        for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) % 360;
+        return h;
+      }
+      const hue = hueOf(Net.id);
+
+      function size() {
+        const d = devicePixelRatio || 1;
+        pad.width = innerWidth * d;
+        pad.height = innerHeight * d;
+        g.setTransform(d, 0, 0, d, 0, 0);
+      }
+      addEventListener("resize", size);
+      size();
+
+      function setStatus() {
+        const text = !TO
+          ? "no laptop in the address"
+          : !online
+          ? "connecting to the internet…"
+          : live
+          ? "connected"
+          : "waiting for the laptop sketch to run…";
+        $("status").textContent = text;
+        $("dot").style.background =
+          live && online ? `hsl(${hue} 80% 60%)` : "#666";
+      }
+
+      if (!TO) {
+        $("prompt").textContent =
+          "Scan the QR code on the laptop screen to join.";
+        setStatus();
+      } else {
+        Net.start(FIREBASE_CONFIG, "osg/" + TO);
+        Net.onStatus((ok) => {
+          online = ok;
+          if (ok) Net.here("phones/" + Net.id, true);
+          setStatus();
+        });
+        Net.onValue("info", (d) => {
+          live = !!d;
+          if (d) {
+            document.body.style.background = d.bg;
+            document.body.style.color = d.ink;
+            $("title").textContent = d.title;
+            $("prompt").textContent = d.prompt;
+          }
+          setStatus();
+        });
+      }
+
+      /* ---- touches → laptop ---- */
+      let lastMove = 0;
+      function send(t, e) {
+        if (!TO) return;
+        if (t === "m") {
+          const now = performance.now();
+          if (now - lastMove < 50) return;
+          lastMove = now;
+        }
+        if (t === "d")
+          ripples.push({ x: e.clientX, y: e.clientY, born: performance.now() });
+        Net.push("touches", {
+          t,
+          x: +(e.clientX / innerWidth).toFixed(4),
+          y: +(e.clientY / innerHeight).toFixed(4),
+          p: Net.id,
+          f: e.isPrimary ? "" : String(e.pointerId),
+        });
+      }
+      pad.addEventListener("pointerdown", (e) => {
+        pad.setPointerCapture(e.pointerId);
+        send("d", e);
+      });
+      pad.addEventListener("pointermove", (e) => {
+        if (e.buttons || e.pointerType === "touch") send("m", e);
+      });
+      pad.addEventListener("pointerup", (e) => send("u", e));
+      pad.addEventListener("pointercancel", (e) => send("u", e));
+
+      /* a small local ring so a touch feels answered */
+      (function loop(now) {
+        g.clearRect(0, 0, innerWidth, innerHeight);
+        ripples = ripples.filter((r) => now - r.born < 700);
+        ripples.forEach((r) => {
+          const a = (now - r.born) / 700;
+          g.strokeStyle = `hsla(${hue},80%,65%,${1 - a})`;
+          g.lineWidth = 2;
+          g.beginPath();
+          g.arc(r.x, r.y, 10 + a * 60, 0, 7);
+          g.stroke();
+        });
+        requestAnimationFrame(loop);
+      })(0);
+    </script>
+  </body>
 </html>
