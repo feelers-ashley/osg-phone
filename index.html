@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#14130f">
+<title>One Small Gesture · phone</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #14130f; color: #f4f2ed;
+    font-family: "Instrument Sans", Aptos, system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+  #pad { position: fixed; inset: 0; touch-action: none; }
+  #top { position: fixed; left: 0; right: 0; top: 0; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 0; pointer-events: none; }
+  #title { font-size: 22px; font-weight: 700; margin: 0; }
+  #prompt { font-size: 16px; opacity: .75; margin: 4px 0 0; }
+  #status { position: fixed; left: 20px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); font: 12px ui-monospace, Menlo, monospace; opacity: .6; pointer-events: none; }
+  #dot { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); right: 20px; width: 14px; height: 14px; border-radius: 50%; background: #666; }
+</style>
+</head>
+<body>
+<canvas id="pad"></canvas>
+<div id="top"><p id="title">One Small Gesture</p><p id="prompt">Connecting…</p></div>
+<div id="status">connecting</div><div id="dot"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+/* The phone side of One Small Gesture. It sends every touch to the laptop
+   whose id is in the address (?to=osg-…). Host this page once; students never edit it. */
+const params = new URLSearchParams(location.search);
+const TO = params.get('to');
+const $ = (id) => document.getElementById(id);
+const pad = $('pad'), g = pad.getContext('2d');
+let hue = 0, conn = null, peer = null, ripples = [];
+
+function size() { const d = devicePixelRatio || 1; pad.width = innerWidth * d; pad.height = innerHeight * d; g.setTransform(d, 0, 0, d, 0, 0); }
+addEventListener('resize', size); size();
+
+function setStatus(text, ok) { $('status').textContent = text; $('dot').style.background = ok ? `hsl(${hue} 80% 60%)` : '#666'; }
+
+function peerOptions() {
+  const h = params.get('peerhost');
+  if (!h) return {};
+  const [host, port] = h.split(':');
+  return { host, port: +(port || 443), path: '/', secure: !port || port === '443' };
+}
+
+function connect() {
+  if (!TO) { $('prompt').textContent = 'Scan the QR code on the laptop screen to join.'; setStatus('no laptop in the address', false); return; }
+  if (!peer || peer.destroyed) {
+    peer = new Peer(undefined, peerOptions());
+    peer.on('open', open);
+    peer.on('error', (e) => { setStatus('trying again (' + e.type + ')', false); if (e.type !== 'peer-unavailable') { peer.destroy(); } setTimeout(connect, 2000); });
+    peer.on('disconnected', () => peer.reconnect());
+  } else open();
+}
+
+function open() {
+  setStatus('connecting to the laptop…', false);
+  conn = peer.connect(TO);
+  conn.on('open', () => setStatus('connected', true));
+  conn.on('data', (d) => {
+    if (d && d.t === 'hello') {
+      hue = d.hue; document.body.style.background = d.bg; document.body.style.color = d.ink;
+      $('title').textContent = d.title; $('prompt').textContent = d.prompt; setStatus('connected', true);
+    }
+  });
+  conn.on('close', () => { setStatus('the laptop went away · retrying', false); setTimeout(connect, 2000); });
+}
+connect();
+
+/* ---- touches → laptop ---- */
+let lastMove = 0;
+function send(t, e) {
+  const x = +(e.clientX / innerWidth).toFixed(4), y = +(e.clientY / innerHeight).toFixed(4);
+  if (t === 'm') { const now = performance.now(); if (now - lastMove < 33) return; lastMove = now; }
+  if (t === 'd') ripples.push({ x: e.clientX, y: e.clientY, born: performance.now() });
+  if (conn && conn.open) conn.send({ t, x, y, f: e.pointerId === undefined ? '' : String(e.isPrimary ? '' : e.pointerId) });
+}
+pad.addEventListener('pointerdown', (e) => { pad.setPointerCapture(e.pointerId); send('d', e); });
+pad.addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') send('m', e); });
+pad.addEventListener('pointerup', (e) => send('u', e));
+pad.addEventListener('pointercancel', (e) => send('u', e));
+
+/* a small local ring so a touch feels answered */
+(function loop(now) {
+  g.clearRect(0, 0, innerWidth, innerHeight);
+  ripples = ripples.filter((r) => now - r.born < 700);
+  ripples.forEach((r) => { const a = (now - r.born) / 700; g.strokeStyle = `hsla(${hue},80%,65%,${1 - a})`; g.lineWidth = 2; g.beginPath(); g.arc(r.x, r.y, 10 + a * 60, 0, 7); g.stroke(); });
+  requestAnimationFrame(loop);
+})(0);
+</script>
+</body>
+</html>
